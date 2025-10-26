@@ -1,109 +1,93 @@
 // src/pages/InsuranceRequestDetail.jsx
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { useCases } from "../context/CaseContext"; // 1. Import our hook
+import { useUser } from "../context/UserContext"; // Import useUser
 
 export default function InsuranceRequestDetail() {
-  const { id } = useParams();
+  const { id } = useParams(); // This `id` is now the `case_id`
   const navigate = useNavigate();
+  const { user } = useUser(); // Get user for API calls
+  const { cases, submitDecision } = useCases(); // 2. Get data and functions
+
   const [request, setRequest] = useState(null);
-  const [summary, setSummary] = useState(
-    "🧠 General Summary (Claude Placeholder): This request appears medically justified pending confirmation of physical therapy completion and adequate documentation."
-  );
+  const [notes, setNotes] = useState(""); // For denial/approval notes
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // ✅ Load request details
+  // 3. Load the request from the live context
   useEffect(() => {
-    const insurerUser = JSON.parse(localStorage.getItem("authUser"));
-    if (!insurerUser?.email) return;
-
-    const allKeys = Object.keys(localStorage);
-    let foundRequest = null;
-
-    // Search through all doctors’ stored requests
-    allKeys.forEach((key) => {
-      if (key.startsWith("requestsData_")) {
-        const arr = JSON.parse(localStorage.getItem(key)) || [];
-        const match = arr.find((r) => String(r.id) === String(id));
-        if (match) foundRequest = { ...match, key };
-      }
-    });
-
-    if (foundRequest) setRequest(foundRequest);
-  }, [id]);
-
-  // ✅ Handle Approve
-  const handleApprove = () => {
-    if (!request) return;
-    updateStatus("Approved");
-    alert("✅ Request marked as Approved.");
-    navigate("/insurer");
-  };
-
-  // ✅ Handle Deny
-  const handleDeny = () => {
-    if (!request) return;
-    const reason =
-      "❌ Denied: The documentation is incomplete. Please include prior physical therapy notes and updated imaging results for reconsideration.";
-    updateStatus("Denied", reason);
-    alert("⚠️ Request marked as Denied.");
-    navigate("/insurer");
-  };
-
-  // ✅ Helper function to update everywhere
-  const updateStatus = (newStatus, denialReason = "") => {
-    const allKeys = Object.keys(localStorage);
-
-    // Update in doctor’s request list
-    allKeys.forEach((key) => {
-      if (key.startsWith("requestsData_")) {
-        const arr = JSON.parse(localStorage.getItem(key)) || [];
-        const updated = arr.map((r) =>
-          String(r.id) === String(id)
-            ? { ...r, status: newStatus, denialReason }
-            : r
-        );
-        localStorage.setItem(key, JSON.stringify(updated));
-      }
-    });
-
-    // Update doctor’s activity
-    const doctorEmail = request.doctorEmail;
-    const activityKey = `doctorActivity_${doctorEmail}`;
-    const activity = JSON.parse(localStorage.getItem(activityKey)) || [];
-    const newActivity = [
-      {
-        id: Date.now(),
-        patient: request.patientName,
-        text:
-          newStatus === "Approved"
-            ? "Insurance approved the pre-authorization request"
-            : "Insurance denied the pre-authorization request",
-        date: new Date().toISOString().split("T")[0],
-      },
-      ...activity,
-    ];
-    localStorage.setItem(activityKey, JSON.stringify(newActivity));
-
-    // Update insurer's approved bills list if approved
-    if (newStatus === "Approved") {
-      const insurerUser = JSON.parse(localStorage.getItem("authUser"));
-      const billsKey = `billsData_${insurerUser.email}`;
-      const bills = JSON.parse(localStorage.getItem(billsKey)) || [];
-      const newBill = {
-        id: request.id,
-        patient: request.patientName,
-        procedure: request.exam_findings || "Procedure",
-        amount: `$${(Math.random() * 1000 + 500).toFixed(2)}`,
-        date: new Date().toISOString().split("T")[0],
-        status: "Paid",
-      };
-      localStorage.setItem(billsKey, JSON.stringify([newBill, ...bills]));
+    // We might have the case already, but if not (e.g., page refresh),
+    // we need a way to fetch it.
+    // For now, we just check the context.
+    const foundRequest = cases.find((r) => String(r.case_id) === String(id));
+    if (foundRequest) {
+      setRequest(foundRequest);
     }
+    // TODO: Add a fetch for a single case if not found in context
+    setIsLoading(false);
+  }, [cases, id]);
+
+  // 4. Handle Approve (Refactored)
+  const handleApprove = async () => {
+    if (!request || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await submitDecision({
+        case_id: request.case_id,
+        decision: "APPROVED",
+        notes: notes || "All criteria met. Approved.",
+      });
+      // No need to update state! WebSocket will handle it.
+      alert("✅ Request marked as Approved.");
+      navigate("/insurer");
+    } catch (err) {
+      console.error("Failed to approve:", err);
+      alert(`Error: Could not approve request. ${err.message}`);
+    }
+    setIsSubmitting(false);
   };
+
+  // 5. Handle Deny (Refactored)
+  const handleDeny = async () => {
+    if (!request || isSubmitting) return;
+    if (!notes) {
+      alert("Please provide a reason for denial in the notes text box.");
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await submitDecision({
+        case_id: request.case_id,
+        decision: "DENIED",
+        notes: notes,
+      });
+      // No need to update state! WebSocket will handle it.
+      alert("⚠️ Request marked as Denied.");
+      navigate("/insurer");
+    } catch (err) {
+      console.error("Failed to deny:", err);
+      alert(`Error: Could not deny request. ${err.message}`);
+    }
+    setIsSubmitting(false);
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen text-gray-600">
+        <p className="text-lg font-semibold mb-3">Loading request...</p>
+      </div>
+    );
+  }
 
   if (!request) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen text-gray-600">
         <p className="text-lg font-semibold mb-3">Request not found.</p>
+        <p className="text-sm mb-4">
+          It may still be processing or you navigated directly. Try refreshing
+          the dashboard.
+        </p>
         <button
           onClick={() => navigate("/insurer")}
           className="bg-gray-800 text-white px-5 py-2 rounded-md hover:bg-gray-700 transition"
@@ -114,6 +98,7 @@ export default function InsuranceRequestDetail() {
     );
   }
 
+  // --- Normal Render ---
   return (
     <div className="min-h-screen w-screen bg-gray-50 p-6">
       {/* Header */}
@@ -129,31 +114,32 @@ export default function InsuranceRequestDetail() {
         </button>
       </div>
 
-      {/* Request Info */}
+      {/* Request Info (Refactored) */}
       <div className="bg-white rounded-xl shadow-md p-6 mb-6">
         <h2 className="text-lg font-semibold text-gray-800 mb-3">
-          Doctor Request Information
+          Case Information
         </h2>
         <div className="space-y-2 text-sm text-gray-700">
           <p>
-            <strong>Doctor:</strong> {request.doctorName || "Unknown"}
+            <strong>Provider:</strong> {request.provider_id}
           </p>
           <p>
-            <strong>Patient:</strong> {request.patientName}
+            <strong>Patient ID:</strong> {request.patient_id}
           </p>
           <p>
-            <strong>Insurance:</strong> {request.insurance}
+            <strong>Procedure:</strong> {request.procedure_code}
           </p>
           <p>
-            <strong>Date Submitted:</strong> {request.date}
+            <strong>Date Submitted:</strong>{" "}
+            {new Date(request.created_at).toLocaleString()}
           </p>
           <p>
             <strong>Status:</strong>{" "}
             <span
               className={`px-3 py-1 rounded-full text-xs font-semibold border ${
-                request.status === "Approved"
+                request.status === "APPROVED"
                   ? "text-green-700 bg-green-100 border-green-200"
-                  : request.status === "Denied"
+                  : request.status === "DENIED"
                   ? "text-red-700 bg-red-100 border-red-200"
                   : "text-yellow-700 bg-yellow-100 border-yellow-200"
               }`}
@@ -164,44 +150,50 @@ export default function InsuranceRequestDetail() {
         </div>
       </div>
 
-      {/* Request Details */}
+      {/* Real AI Analysis */}
       <div className="bg-white rounded-xl shadow-md p-6 mb-6">
         <h2 className="text-lg font-semibold text-gray-800 mb-3">
-          Clinical Details
+          AI Analysis Summary
         </h2>
-        <div className="space-y-2 text-sm text-gray-700">
-          <p>
-            <strong>Clinical Summary:</strong> {request.clinical_summary}
-          </p>
-          <p>
-            <strong>Treatments Tried:</strong> {request.treatments_tried}
-          </p>
-          <p>
-            <strong>Exam Findings:</strong> {request.exam_findings}
-          </p>
-          {request.other_notes && (
-            <p>
-              <strong>Other Notes:</strong> {request.other_notes}
-            </p>
-          )}
-          {request.status === "Denied" && request.denialReason && (
-            <p className="text-red-600 mt-3">
-              <strong>Denial Reason:</strong> {request.denialReason}
+        <div className="space-y-3">
+          {request.analysis &&
+          typeof request.analysis === "object" &&
+          !request.analysis.error ? (
+            Object.entries(request.analysis).map(([key, value]) => (
+              <div key={key} className="text-sm pb-2 border-b last:border-none">
+                <p className="font-semibold text-gray-700">{key}</p>
+                <p
+                  className={`pl-2 font-medium ${
+                    value.met ? "text-green-600" : "text-red-600"
+                  }`}
+                >
+                  {value.met ? "✅ Met" : "❌ Missing / Not Found"}
+                </p>
+                <p className="pl-2 text-gray-600">
+                  <b>Evidence:</b> {value.evidence}
+                </p>
+              </div>
+            ))
+          ) : (
+            <p className="text-gray-500 italic">
+              {request.analysis?.error ||
+                "No analysis details available. Status is PENDING."}
             </p>
           )}
         </div>
       </div>
 
-      {/* Claude Placeholder Summary */}
+      {/* Decision Notes */}
       <div className="bg-white rounded-xl shadow-md p-6 mb-6">
         <h2 className="text-lg font-semibold text-gray-800 mb-3">
-          General Summary (AI Placeholder)
+          Decision Notes (Required for Denial)
         </h2>
         <textarea
           className="w-full border border-gray-300 rounded-md p-3 text-sm text-gray-700"
           rows="4"
-          value={summary}
-          onChange={(e) => setSummary(e.target.value)}
+          placeholder="e.g., Denied: Patient has not completed 6 weeks of physical therapy."
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
         />
       </div>
 
@@ -209,15 +201,17 @@ export default function InsuranceRequestDetail() {
       <div className="flex justify-end gap-4">
         <button
           onClick={handleDeny}
-          className="bg-red-600 text-white px-6 py-2 rounded-md hover:bg-red-700 transition"
+          disabled={isSubmitting}
+          className="bg-red-600 text-white px-6 py-2 rounded-md hover:bg-red-700 transition disabled:opacity-50"
         >
-          Deny Request
+          {isSubmitting ? "Submitting..." : "Deny Request"}
         </button>
         <button
           onClick={handleApprove}
-          className="bg-green-600 text-white px-6 py-2 rounded-md hover:bg-green-700 transition"
+          disabled={isSubmitting}
+          className="bg-green-600 text-white px-6 py-2 rounded-md hover:bg-green-700 transition disabled:opacity-50"
         >
-          Approve Request
+          {isSubmitting ? "Submitting..." : "Approve Request"}
         </button>
       </div>
     </div>

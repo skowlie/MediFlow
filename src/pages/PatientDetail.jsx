@@ -1,108 +1,98 @@
 // src/pages/PatientDetail.jsx
-import React, { useEffect, useState, useContext } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { UserContext } from "../context/UserContext";
+import { useUser } from "../context/UserContext"; // Keep this
+import { useCases } from "../context/CaseContext"; // 1. Import our new hook
 
 export default function PatientDetail() {
-  const { id } = useParams();
+  const { id } = useParams(); // This is the patient's code
   const navigate = useNavigate();
 
-  const contextUser = useContext(UserContext)?.user;
-  const storedUser = JSON.parse(localStorage.getItem("authUser"));
-  const user = contextUser || storedUser;
+  const { user } = useUser();
+
+  // 2. Get cases and API functions from context
+  const {
+    cases,
+    createCase,
+    getCasesByPatient,
+    isLoading: casesLoading,
+  } = useCases();
 
   const [patient, setPatient] = useState(null);
-  const [requests, setRequests] = useState([]);
+  // This state is now *derived* from the global context
+  const [patientRequests, setPatientRequests] = useState([]);
   const [visits, setVisits] = useState([]);
   const [newRequest, setNewRequest] = useState({
-    clinical_summary: "",
-    treatments_tried: "",
-    exam_findings: "",
-    other_notes: "",
+    procedure_code: "", // This is the main field we need
+    notes: "", // Simple notes field for the doctor
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // ✅ Unified effect for loading data
+  // Effect for loading patient (from localStorage, that's fine)
   useEffect(() => {
     if (!user || !user.email || !id) return;
 
-    const loadData = () => {
-      try {
-        const patientKey = `patientsData_${user.email}`;
-        const allPatients = JSON.parse(localStorage.getItem(patientKey)) || [];
-        const found = allPatients.find((p) => String(p.code) === String(id));
-        setPatient(found || null);
+    // Load patient from local storage
+    const patientKey = `patientsData_${user.email}`;
+    const allPatients = JSON.parse(localStorage.getItem(patientKey)) || [];
+    const found = allPatients.find((p) => String(p.code) === String(id));
+    setPatient(found || null);
 
-        if (found) {
-          const reqKey = `requestsData_${user.email}_${id}`;
-          const patientReqs = JSON.parse(localStorage.getItem(reqKey)) || [];
-          setRequests(patientReqs.sort((a, b) => b.id - a.id));
-        }
+    // Load initial cases for *this* patient
+    if (found) {
+      // We call this to "backfill" the context if it's empty
+      getCasesByPatient(found.code).catch((err) => {
+        console.error("Could not load initial cases:", err);
+      });
+    }
 
-        setVisits([
-          { id: 1, reason: "Follow-up for MRI results", date: "2025-10-12" },
-          { id: 2, reason: "Initial consultation", date: "2025-09-28" },
-        ]);
-      } catch (err) {
-        console.error("Error loading patient:", err);
-        setPatient(null);
-      }
-    };
+    // Mock visits, this is fine
+    setVisits([
+      { id: 1, reason: "Follow-up for MRI results", date: "2025-10-12" },
+      { id: 2, reason: "Initial consultation", date: "2025-09-28" },
+    ]);
+  }, [user, id, getCasesByPatient]);
 
-    // Initial load
-    loadData();
+  // 3. This effect *derives* this patient's requests from the global `cases`
+  useEffect(() => {
+    if (patient) {
+      const filteredCases = cases
+        .filter((c) => c.patient_id === patient.code)
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      setPatientRequests(filteredCases);
+    }
+  }, [cases, patient]); // Re-run whenever the global case list changes!
 
-    // ✅ Update when localStorage changes
-    const handleStorageChange = (e) => {
-      if (e.key?.includes("requestsData_") || e.key?.includes("patientsData_")) {
-        loadData();
-      }
-    };
-
-    window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
-  }, [user, id]);
-
-  // --- Submit new insurance request ---
-  const handleSubmitRequest = (e) => {
+  // 4. --- Submit new insurance request (Refactored) ---
+  const handleSubmitRequest = async (e) => {
     e.preventDefault();
-    if (!patient || !user?.email) return;
+    if (!patient || !user?.email || !newRequest.procedure_code) {
+      alert("Please enter a procedure code.");
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      // Call the API instead of localStorage
+      await createCase({
+        patient_id: patient.code,
+        provider_id: user.email, // Using email as provider_id
+        procedure_code: newRequest.procedure_code,
+      });
 
-    const newReq = {
-      id: Date.now(),
-      ...newRequest,
-      patientName: patient.name,
-      patientCode: patient.code,
-      insurance: patient.insurance,
-      status: "Pending",
-      date: new Date().toISOString().split("T")[0],
-      denialReason: "",
-    };
+      // We don't need to update state. The WebSocket message will!
+      // The server will respond with the PENDING case, which the
+      // WebSocket will then update to APPROVED_READY/MISSING_INFO.
 
-    const reqKey = `requestsData_${user.email}_${patient.code}`;
-    const existing = JSON.parse(localStorage.getItem(reqKey)) || [];
-    const updated = [newReq, ...existing];
-    localStorage.setItem(reqKey, JSON.stringify(updated));
-    setRequests(updated);
+      alert(
+        "Request submitted! The status will update automatically in the list below."
+      );
 
-    const actKey = `doctorActivity_${user.email}`;
-    const prev = JSON.parse(localStorage.getItem(actKey)) || [];
-    const newAct = [
-      {
-        id: Date.now(),
-        patient: patient.name,
-        text: "Submitted new pre-authorization request",
-        date: new Date().toISOString().split("T")[0],
-      },
-      ...prev,
-    ];
-    localStorage.setItem(actKey, JSON.stringify(newAct));
-
-    setNewRequest({
-      clinical_summary: "",
-      treatments_tried: "",
-      exam_findings: "",
-      other_notes: "",
-    });
+      setNewRequest({ procedure_code: "", notes: "" });
+    } catch (err) {
+      console.error("Failed to submit case:", err);
+      alert(`Error: Failed to submit case. ${err.message}`);
+    }
+    setIsSubmitting(false);
   };
 
   // --- Loading and error states ---
@@ -150,7 +140,7 @@ export default function PatientDetail() {
         </button>
       </div>
 
-      {/* Patient Record */}
+      {/* Patient Record (No change needed) */}
       <div className="bg-white shadow-md rounded-xl p-6 mb-8">
         <h2 className="text-xl font-semibold text-gray-800 mb-3">
           Patient Record
@@ -194,93 +184,124 @@ export default function PatientDetail() {
 
       {/* Requests and Visits */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Requests */}
+        {/* Requests (Refactored) */}
         <div className="bg-white shadow-md rounded-xl p-6">
           <h2 className="text-xl font-semibold text-gray-800 mb-4">
-            Insurance Requests
+            New Insurance Request
           </h2>
 
           <form
             onSubmit={handleSubmitRequest}
             className="grid grid-cols-1 gap-4 mb-6"
           >
-            {[
-              "clinical_summary",
-              "treatments_tried",
-              "exam_findings",
-              "other_notes",
-            ].map((f) => (
-              <textarea
-                key={f}
-                placeholder={f.replace("_", " ").replace("_", " ")}
-                className="border rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                value={newRequest[f]}
-                onChange={(e) =>
-                  setNewRequest({ ...newRequest, [f]: e.target.value })
-                }
-              />
-            ))}
+            <input
+              key="procedure_code"
+              placeholder="Procedure Code (e.g., CPT 73721)"
+              className="border rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              value={newRequest.procedure_code}
+              onChange={(e) =>
+                setNewRequest({ ...newRequest, procedure_code: e.target.value })
+              }
+              required
+            />
+            <textarea
+              key="notes"
+              placeholder="Optional: Internal notes for this request"
+              className="border rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              value={newRequest.notes}
+              onChange={(e) =>
+                setNewRequest({ ...newRequest, notes: e.target.value })
+              }
+            />
             <div className="flex justify-end">
               <button
                 type="submit"
-                className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 transition"
+                disabled={isSubmitting}
+                className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 transition disabled:opacity-50"
               >
-                Submit Request
+                {isSubmitting ? "Submitting..." : "Submit Request"}
               </button>
             </div>
           </form>
 
-          {requests.length > 0 ? (
+          {/* Refactored Request List */}
+          {casesLoading && <p>Loading requests...</p>}
+          {patientRequests.length > 0 ? (
             <>
               <h3 className="text-lg font-semibold text-gray-800 mb-3">
-                Recently Added Requests
+                Recent Requests
               </h3>
               <div className="space-y-3">
-                {requests.map((req) => (
+                {patientRequests.map((req) => (
                   <details
-                    key={req.id}
+                    key={req.case_id} // Use real case_id
                     className="border rounded-md p-4 bg-gray-50 hover:bg-gray-100 transition"
                   >
                     <summary className="cursor-pointer flex justify-between font-medium text-gray-800">
                       <span>
-                        {req.date} – {req.patientName}
+                        {new Date(req.created_at).toLocaleDateString()} –{" "}
+                        {req.procedure_code}
                       </span>
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-semibold border ${
-                          req.status === "Approved"
+                          req.status === "APPROVED"
                             ? "text-green-700 bg-green-100 border-green-200"
-                            : req.status === "Denied"
+                            : req.status === "DENIED"
                             ? "text-red-700 bg-red-100 border-red-200"
-                            : "text-yellow-700 bg-yellow-100 border-yellow-200"
+                            : req.status === "APPROVED_READY"
+                            ? "text-blue-700 bg-blue-100 border-blue-200"
+                            : req.status === "MISSING_INFORMATION"
+                            ? "text-yellow-700 bg-yellow-100 border-yellow-200"
+                            : "text-gray-700 bg-gray-100 border-gray-200"
                         }`}
                       >
                         {req.status}
                       </span>
                     </summary>
-                    <div className="mt-3 text-sm text-gray-600 space-y-1">
+                    <div className="mt-3 text-sm text-gray-600 space-y-2">
                       <p>
-                        <b>Clinical Summary:</b> {req.clinical_summary}
+                        <b>Case ID:</b> {req.case_id}
                       </p>
                       <p>
-                        <b>Treatments Tried:</b> {req.treatments_tried}
+                        <b>Procedure:</b> {req.procedure_code}
                       </p>
-                      <p>
-                        <b>Exam Findings:</b> {req.exam_findings}
-                      </p>
-                      {req.other_notes && (
-                        <p>
-                          <b>Other Notes:</b> {req.other_notes}
-                        </p>
-                      )}
-                      {req.status === "Denied" && (
-                        <div className="mt-2 border-l-4 border-red-400 pl-3">
-                          <p className="text-red-600 font-medium mb-1">
-                            Denied by Insurance
+
+                      {/* Show the real AI analysis */}
+                      <div className="mt-2 border-l-4 border-gray-300 pl-3">
+                        <p className="font-medium mb-1">AI Analysis:</p>
+                        {req.analysis &&
+                        typeof req.analysis === "object" &&
+                        !req.analysis.error ? (
+                          Object.entries(req.analysis).map(([key, value]) => (
+                            <div key={key} className="text-xs mb-1">
+                              <p className="font-semibold">{key}</p>
+                              <p
+                                className={`pl-2 ${
+                                  value.met ? "text-green-600" : "text-red-600"
+                                }`}
+                              >
+                                {value.met ? "✅ Met" : "❌ Missing"}
+                              </p>
+                              <p className="pl-2 text-gray-500">
+                                <b>Evidence:</b> {value.evidence}
+                              </p>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-xs text-gray-500 italic">
+                            {req.analysis?.error || "Analysis pending..."}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Show insurer notes if they exist */}
+                      {req.analysis?.insurer_decision_notes && (
+                        <div className="mt-2 border-l-4 border-blue-400 pl-3">
+                          <p className="text-blue-600 font-medium mb-1">
+                            Insurer Notes:
                           </p>
                           <p className="text-sm text-gray-700">
-                            <b>Reason:</b>{" "}
-                            {req.denialReason ||
-                              "Documentation incomplete. Please include prior notes and updated results."}
+                            {req.analysis.insurer_decision_notes}
                           </p>
                         </div>
                       )}
@@ -290,11 +311,13 @@ export default function PatientDetail() {
               </div>
             </>
           ) : (
-            <p className="text-gray-500 italic">No requests yet.</p>
+            !casesLoading && (
+              <p className="text-gray-500 italic">No requests yet.</p>
+            )
           )}
         </div>
 
-        {/* Visits */}
+        {/* Visits (No change needed) */}
         <div className="bg-white shadow-md rounded-xl p-6">
           <h2 className="text-xl font-semibold text-gray-800 mb-4">
             Recent Visits
