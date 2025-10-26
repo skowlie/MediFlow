@@ -1,102 +1,91 @@
+// src/pages/LoginPage.jsx
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useUser } from "../context/UserContext";
 
 export default function LoginPage() {
-  const { setUser } = useUser();
   const navigate = useNavigate();
-
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [form, setForm] = useState({ email: "", password: "" });
   const [error, setError] = useState("");
 
-  const handleLogin = (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
 
-    const users = JSON.parse(localStorage.getItem("userAccounts")) || [];
+    // ✅ Retrieve all registered users
+    const users = JSON.parse(localStorage.getItem("users")) || [];
+
+    // ✅ Find match
     const foundUser = users.find(
-      (u) => u.email === email.trim() && u.password === password.trim()
+      (u) =>
+        u.email.trim().toLowerCase() === form.email.trim().toLowerCase() &&
+        u.password.trim() === form.password.trim()
     );
 
     if (!foundUser) {
-      setError("Invalid email or password");
+      setError("Invalid email or password.");
       return;
     }
 
+    // ✅ Save logged-in user
     localStorage.setItem("authUser", JSON.stringify(foundUser));
-    setUser(foundUser);
-    localStorage.setItem("user", JSON.stringify(foundUser));
+    setError("");
 
+    // Redirect based on role
     if (foundUser.role === "doctor") {
       navigate("/doctor");
     } else if (foundUser.role === "insurer") {
       navigate("/insurer");
     } else {
-      setError("Invalid user role");
+      navigate("/");
     }
   };
 
   return (
-    <div className="min-h-screen w-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200">
-      <div className="bg-white p-10 rounded-2xl shadow-lg w-[90%] max-w-md">
-        <h1 className="text-2xl font-bold mb-6 text-blue-700 text-center">
+    <div className="min-h-screen w-screen flex items-center justify-center bg-gray-50">
+      <div className="bg-white p-8 rounded-xl shadow-md w-[90%] max-w-md">
+        <h2 className="text-2xl font-semibold text-center mb-6 text-gray-800">
           Login to Portal
-        </h1>
-        <form onSubmit={handleLogin} className="space-y-4">
+        </h2>
+
+        {error && (
+          <p className="text-red-600 text-center text-sm mb-4">{error}</p>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
           <input
             type="email"
             placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
             className="w-full border border-gray-300 rounded-lg p-2"
             required
           />
+
           <input
             type="password"
             placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
             className="w-full border border-gray-300 rounded-lg p-2"
             required
           />
-          {error && <p className="text-red-600 text-sm">{error}</p>}
+
           <button
             type="submit"
             className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition"
           >
-            Login
+            Log In
           </button>
         </form>
-        <p className="text-center text-sm mt-4">
+
+        <p className="text-center text-gray-500 text-sm mt-4">
           Don’t have an account?{" "}
           <span
-            className="text-blue-600 hover:underline cursor-pointer"
             onClick={() => navigate("/signup")}
+            className="text-blue-600 cursor-pointer hover:underline"
           >
             Sign up
           </span>
         </p>
-        {/* Developer Full Reset Button */}
-<div className="text-center mt-6">
-  <button
-    onClick={() => {
-      if (
-        window.confirm(
-          "⚠️ This will delete ALL saved data — accounts, patients, requests, and logins. Continue?"
-        )
-      ) {
-        localStorage.clear();
-        alert("🧹 All data (including accounts and logins) has been reset!");
-        window.location.reload(); // reload app to clear state
-      }
-    }}
-    className="text-sm text-red-600 hover:text-red-800 underline"
-  >
-    Reset ALL Data (Doctors + Insurers + Accounts)
-  </button>
-</div>
-
-
       </div>
     </div>
   );

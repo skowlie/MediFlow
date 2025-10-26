@@ -1,19 +1,16 @@
+// src/components/ProtectedRoute.jsx
+import React from "react";
 import { Navigate } from "react-router-dom";
-import { useUser } from "../context/UserContext";
 
-export default function ProtectedRoute({ user, allowedRole, children }) {
-  const { loading } = useUser();
+export default function ProtectedRoute({ children, allowedRole }) {
+  // ✅ Always read from localStorage instead of context
+  const storedUser = JSON.parse(localStorage.getItem("authUser"));
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50 text-gray-600">
-        Loading...
-      </div>
-    );
+  if (!storedUser) {
+    return <Navigate to="/login" replace />;
   }
 
-  if (!user) return <Navigate to="/login" replace />;
-  if (allowedRole && user.role !== allowedRole) {
+  if (allowedRole && storedUser.role !== allowedRole) {
     return <Navigate to="/login" replace />;
   }
 

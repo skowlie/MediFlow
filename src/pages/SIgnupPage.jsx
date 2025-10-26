@@ -1,88 +1,141 @@
+// src/pages/SignupPage.jsx
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 export default function SignupPage() {
   const navigate = useNavigate();
 
-  const [formData, setFormData] = useState({
+  const [form, setForm] = useState({
     fullName: "",
     email: "",
     password: "",
     role: "doctor",
+    insuranceName: "",
+    policyFile: null,
   });
-  const [error, setError] = useState("");
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+  // ✅ Convert uploaded PDF to base64 string
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file && file.type === "application/pdf") {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setForm((prev) => ({ ...prev, policyFile: reader.result }));
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
-  const handleSignup = (e) => {
+  // ✅ Handle form submission
+  const handleSubmit = (e) => {
     e.preventDefault();
-    const { fullName, email, password, role } = formData;
 
-    if (!email || !password || !fullName) {
-      setError("All fields are required");
-      return;
-    }
+    const users = JSON.parse(localStorage.getItem("users")) || [];
 
-    const users = JSON.parse(localStorage.getItem("userAccounts")) || [];
-    const existing = users.find((u) => u.email === email.trim());
-    if (existing) {
-      setError("Account with this email already exists");
-      return;
-    }
+    const newUser = {
+      ...form,
+      id: Date.now(),
+    };
 
-    const newUser = { fullName, email, password, role };
-    users.push(newUser);
-    localStorage.setItem("userAccounts", JSON.stringify(users));
+    localStorage.setItem("users", JSON.stringify([...users, newUser]));
+    localStorage.setItem("authUser", JSON.stringify(newUser));
 
-    navigate("/login");
+    // Redirect based on role
+    navigate(form.role === "doctor" ? "/doctor" : "/insurer");
   };
 
   return (
-    <div className="min-h-screen w-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200">
-      <div className="bg-white p-10 rounded-2xl shadow-lg w-[90%] max-w-md">
-        <h1 className="text-2xl font-bold mb-6 text-blue-700 text-center">
-          Create Account
-        </h1>
-        <form onSubmit={handleSignup} className="space-y-4">
+    <div className="min-h-screen w-screen flex items-center justify-center bg-gray-50">
+      <div className="bg-white p-8 rounded-xl shadow-md w-[90%] max-w-md">
+        <h2 className="text-2xl font-semibold text-center mb-6 text-gray-800">
+          Create Your Account
+        </h2>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Full Name */}
           <input
             type="text"
-            name="fullName"
             placeholder="Full Name"
-            value={formData.fullName}
-            onChange={handleChange}
+            value={form.fullName}
+            onChange={(e) => setForm({ ...form, fullName: e.target.value })}
             className="w-full border border-gray-300 rounded-lg p-2"
             required
           />
+
+          {/* Email */}
           <input
             type="email"
-            name="email"
             placeholder="Email"
-            value={formData.email}
-            onChange={handleChange}
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
             className="w-full border border-gray-300 rounded-lg p-2"
             required
           />
+
+          {/* Password */}
           <input
             type="password"
-            name="password"
             placeholder="Password"
-            value={formData.password}
-            onChange={handleChange}
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
             className="w-full border border-gray-300 rounded-lg p-2"
             required
           />
+
+          {/* Role Selector */}
           <select
-            name="role"
-            value={formData.role}
-            onChange={handleChange}
+            value={form.role}
+            onChange={(e) => setForm({ ...form, role: e.target.value })}
             className="w-full border border-gray-300 rounded-lg p-2"
           >
             <option value="doctor">Doctor</option>
-            <option value="insurer">Insurance Company</option>
+            <option value="insurer">Insurance Representative</option>
           </select>
-          {error && <p className="text-red-600 text-sm">{error}</p>}
+
+          {/* ✅ Only show if insurer role selected */}
+          {form.role === "insurer" && (
+            <>
+              {/* Insurance company name */}
+              <input
+                type="text"
+                placeholder="Insurance Company Name"
+                value={form.insuranceName}
+                onChange={(e) =>
+                  setForm({ ...form, insuranceName: e.target.value })
+                }
+                className="w-full border border-gray-300 rounded-lg p-2"
+                required
+              />
+
+              {/* Policy upload */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Upload Policy PDF
+                </label>
+
+                <div className="flex items-center gap-3">
+                  <input
+                    id="policy-upload"
+                    type="file"
+                    accept="application/pdf"
+                    onChange={handleFileChange}
+                    className="hidden"
+                  />
+                  <label
+                    htmlFor="policy-upload"
+                    className="bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-md cursor-pointer hover:bg-blue-700 transition-colors"
+                  >
+                    Choose File
+                  </label>
+                  <span className="text-sm text-gray-500 truncate">
+                    {form.policyFile ? "File uploaded" : "No file chosen"}
+                  </span>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Submit */}
           <button
             type="submit"
             className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition"
@@ -90,13 +143,15 @@ export default function SignupPage() {
             Sign Up
           </button>
         </form>
-        <p className="text-center text-sm mt-4">
+
+        {/* Already have account */}
+        <p className="text-center text-gray-500 text-sm mt-4">
           Already have an account?{" "}
           <span
-            className="text-blue-600 hover:underline cursor-pointer"
             onClick={() => navigate("/login")}
+            className="text-blue-600 cursor-pointer hover:underline"
           >
-            Login
+            Log in
           </span>
         </p>
       </div>

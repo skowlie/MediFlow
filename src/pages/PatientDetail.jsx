@@ -21,52 +21,46 @@ export default function PatientDetail() {
     other_notes: "",
   });
 
-  // --- Load patient + their requests ---
+  // ✅ Unified effect for loading data
   useEffect(() => {
     if (!user || !user.email || !id) return;
 
-    try {
-      const patientKey = `patientsData_${user.email}`;
-      const allPatients = JSON.parse(localStorage.getItem(patientKey)) || [];
-      const found = allPatients.find((p) => String(p.code) === String(id));
-      setPatient(found || null);
+    const loadData = () => {
+      try {
+        const patientKey = `patientsData_${user.email}`;
+        const allPatients = JSON.parse(localStorage.getItem(patientKey)) || [];
+        const found = allPatients.find((p) => String(p.code) === String(id));
+        setPatient(found || null);
 
-      const reqKey = `requestsData_${user.email}_${id}`;
-      const patientReqs = JSON.parse(localStorage.getItem(reqKey)) || [];
-      setRequests(patientReqs.sort((a, b) => b.id - a.id));
+        if (found) {
+          const reqKey = `requestsData_${user.email}_${id}`;
+          const patientReqs = JSON.parse(localStorage.getItem(reqKey)) || [];
+          setRequests(patientReqs.sort((a, b) => b.id - a.id));
+        }
 
-      setVisits([
-        { id: 1, reason: "Follow-up for MRI results", date: "2025-10-12" },
-        { id: 2, reason: "Initial consultation", date: "2025-09-28" },
-      ]);
-    } catch (err) {
-      console.error("Error loading patient:", err);
-      setPatient(null);
-    }
-  }, [id, user]);
-
-  // --- Listen for insurer updates in localStorage ---
-  useEffect(() => {
-    if (!user || !user.email || !id) return;
-
-    const handleStorage = () => {
-      const reqKey = `requestsData_${user.email}_${id}`;
-      const updated = JSON.parse(localStorage.getItem(reqKey)) || [];
-      setRequests(updated.sort((a, b) => b.id - a.id));
+        setVisits([
+          { id: 1, reason: "Follow-up for MRI results", date: "2025-10-12" },
+          { id: 2, reason: "Initial consultation", date: "2025-09-28" },
+        ]);
+      } catch (err) {
+        console.error("Error loading patient:", err);
+        setPatient(null);
+      }
     };
-    window.addEventListener("storage", handleStorage);
-    return () => window.removeEventListener("storage", handleStorage);
-  }, [id, user]);
 
-  // --- Log latest status (optional) ---
-  useEffect(() => {
-    if (requests.length === 0) return;
-    const latest = requests[0];
-    if (latest.status === "Approved")
-      console.log("✅ Request Approved — Ready for billing!");
-    else if (latest.status === "Denied")
-      console.log("❌ Request Denied — Needs revision.");
-  }, [requests]);
+    // Initial load
+    loadData();
+
+    // ✅ Update when localStorage changes
+    const handleStorageChange = (e) => {
+      if (e.key?.includes("requestsData_") || e.key?.includes("patientsData_")) {
+        loadData();
+      }
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, [user, id]);
 
   // --- Submit new insurance request ---
   const handleSubmitRequest = (e) => {
@@ -198,8 +192,9 @@ export default function PatientDetail() {
         )}
       </div>
 
-      {/* Requests */}
+      {/* Requests and Visits */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Requests */}
         <div className="bg-white shadow-md rounded-xl p-6">
           <h2 className="text-xl font-semibold text-gray-800 mb-4">
             Insurance Requests
@@ -209,7 +204,12 @@ export default function PatientDetail() {
             onSubmit={handleSubmitRequest}
             className="grid grid-cols-1 gap-4 mb-6"
           >
-            {["clinical_summary", "treatments_tried", "exam_findings", "other_notes"].map((f) => (
+            {[
+              "clinical_summary",
+              "treatments_tried",
+              "exam_findings",
+              "other_notes",
+            ].map((f) => (
               <textarea
                 key={f}
                 placeholder={f.replace("_", " ").replace("_", " ")}

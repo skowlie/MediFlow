@@ -67,17 +67,49 @@ export default function InsuranceDashboard() {
   return (
     <div className="min-h-screen w-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 flex flex-col">
       {/* Navbar */}
-      <header className="bg-white shadow-md py-4 px-6 flex justify-between items-center">
-        <h1 className="text-2xl font-semibold text-blue-700">
-          Welcome, {user?.fullName || "Insurance Company"}
-        </h1>
-        <button
-          onClick={handleLogout}
-          className="text-sm bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition"
-        >
-          Log Out
-        </button>
-      </header>
+      <header className="bg-white shadow-md px-8 py-4 flex justify-between items-center">
+  <h1 className="text-2xl font-bold text-blue-700">
+    {user?.insuranceName || "Insurer"}’s Dashboard 🏢
+  </h1>
+
+  <div className="flex gap-3">
+    {/* ✅ Show PDF button only if a file exists */}
+    {user?.policyFile && (
+      <button
+        onClick={() => {
+          try {
+            const pdfData = user.policyFile;
+            const base64 = pdfData.startsWith("data:application/pdf;base64,")
+              ? pdfData.split(",")[1]
+              : pdfData;
+            const bytes = atob(base64)
+              .split("")
+              .map((c) => c.charCodeAt(0));
+            const blob = new Blob([new Uint8Array(bytes)], {
+              type: "application/pdf",
+            });
+            const url = URL.createObjectURL(blob);
+            window.open(url, "_blank");
+          } catch (err) {
+            console.error("Error opening PDF:", err);
+            alert("⚠️ Could not open policy file. Try re-uploading.");
+          }
+        }}
+        className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition"
+      >
+        View Policy PDF
+      </button>
+    )}
+
+    <button
+      onClick={handleLogout}
+      className="text-sm bg-gray-800 text-white px-4 py-2 rounded-md hover:bg-gray-700 transition"
+    >
+      Log Out
+    </button>
+  </div>
+</header>
+
 
       {/* Main content */}
       <main className="flex-1 p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
